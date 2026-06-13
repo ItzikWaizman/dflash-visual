@@ -95,11 +95,14 @@ def cache_t5_features(prompts: list, t5_path: str, t5_model_type: str,
             print(f"[t5] encoded {s + emb.shape[0]} / {N}", flush=True)
     # Atomic write: savez_compressed can take many minutes for ~30 GB files,
     # during which the destination path "exists" but is a partial zip. Polling
-    # tasks would race on it. Write to .tmp, then atomically rename.
-    tmp_path = out_path + ".tmp"
+    # tasks would race on it. Write to a tmp path that already ends in .npz
+    # (numpy auto-appends .npz otherwise!), then atomically rename.
+    assert out_path.endswith(".npz"), f"out_path must end in .npz: {out_path}"
+    tmp_path = out_path[:-4] + ".tmp.npz"   # .../t5_features.tmp.npz
     print(f"[t5] saving to {tmp_path}", flush=True)
     np.savez_compressed(tmp_path, prompts=np.array(prompts, dtype=object),
                         feats=feats.astype(np.float16), masks=masks)
+    assert os.path.exists(tmp_path), f"savez did not produce {tmp_path}"
     os.replace(tmp_path, out_path)
     print(f"[t5] renamed -> {out_path}", flush=True)
     del t5
