@@ -1,13 +1,8 @@
 #!/bin/bash
 # Evaluation, parallelizable across prompt/class subsets via SLURM job array.
 #
-# Usage:
-#   sbatch -A gpu-tad-wolf_v2 -p gpu-tad-pool --qos=owner \
-#          --time=4:00:00 --array=0-1 --gres=gpu:1 \
-#          --cpus-per-task=2 --mem=32G \
-#          --chdir /scratch300/$USER/dflash_visual/code \
-#          -o /scratch300/$USER/dflash_visual/code/cluster/output_logs/eval_%A_%a.txt \
-#          cluster/scripts/eval.sh llamagen_xl_t2i_stage2
+# Usage (one-line sbatch, per context.md):
+#   sbatch -A gpu-tad-wolf_v2 -p gpu-tad-pool --qos=owner --gres=gpu:1 --time=04:00:00 --array=0-1 --cpus-per-task=2 --mem=32G -o output_logs/eval_llamagen_xl_t2i_stage2_%A_%a.out --job-name=eval_xlt2i --chdir /scratch300/$USER/dflash_vlm/dflash-visual/ ./cluster/lib/eval.sh llamagen_xl_t2i_stage2
 set -euo pipefail
 
 source /scratch300/$USER/env.sh

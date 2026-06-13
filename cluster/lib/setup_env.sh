@@ -2,13 +2,8 @@
 # One-time cluster setup: install DFlash deps into the existing `unlearning`
 # conda env, then download LlamaGen pretrained weights.
 #
-# Usage:
-#   sbatch -A gpu-tad-wolf_v2 -p gpu-tad-pool --qos=owner \
-#          --gres=gpu:1 --time=2:00:00 \
-#          --cpus-per-task=2 --mem=16G \
-#          --chdir /scratch300/$USER/dflash_vlm/dflash-visual/ \
-#          -o output_logs/setup_env.out \
-#          cluster/lib/setup_env.sh
+# Usage (one-line sbatch, per context.md):
+#   sbatch -A gpu-tad-wolf_v2 -p gpu-tad-pool --qos=owner --gres=gpu:1 --time=02:00:00 --cpus-per-task=2 --mem=16G -o output_logs/setup_env.out --job-name=dflash_setup --chdir /scratch300/$USER/dflash_vlm/dflash-visual/ ./cluster/lib/setup_env.sh
 set -euo pipefail
 
 source /scratch300/$USER/env.sh

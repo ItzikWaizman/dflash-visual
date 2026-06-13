@@ -1,13 +1,8 @@
 #!/bin/bash
 # Datagen job. Submit as SLURM job array for parallel shard generation.
 #
-# Usage:
-#   sbatch -A gpu-tad-wolf_v2 -p gpu-tad-pool --qos=owner \
-#          --time=20:00:00 --array=0-3 --gres=gpu:1 \
-#          --cpus-per-task=4 --mem=48G \
-#          --chdir /scratch300/$USER/dflash_visual/code \
-#          -o /scratch300/$USER/dflash_visual/code/cluster/output_logs/datagen_%A_%a.txt \
-#          cluster/scripts/datagen.sh llamagen_xl_t2i_stage2
+# Usage (one-line sbatch, per context.md):
+#   sbatch -A gpu-tad-wolf_v2 -p gpu-tad-pool --qos=owner --gres=gpu:1 --time=20:00:00 --array=0-3 --cpus-per-task=4 --mem=48G -o output_logs/datagen_llamagen_xl_t2i_stage2_%A_%a.out --job-name=datagen_xlt2i --chdir /scratch300/$USER/dflash_vlm/dflash-visual/ ./cluster/lib/datagen.sh llamagen_xl_t2i_stage2
 set -euo pipefail
 
 source /scratch300/$USER/env.sh
