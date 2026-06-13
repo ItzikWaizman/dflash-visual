@@ -16,13 +16,20 @@ import sys
 from huggingface_hub import hf_hub_download
 
 
-LLAMAGEN_FILES = [
-    "c2i_3B_384.pt",           # ~6.3 GB  -- c2i pilot target
-    "c2i_XXL_384.pt",          # ~2.8 GB  -- alt c2i scale point
-    "vq_ds16_c2i.pt",          # ~0.5 GB  -- VQ tokenizer for c2i
-    "t2i_XL_stage2_512.pt",    # ~1.5 GB  -- t2i (LlamaGen-XL Stage II 512x512)
-    "vq_ds16_t2i.pt",          # ~0.5 GB  -- VQ tokenizer for t2i
-]
+# LlamaGen weights are split across two HF repos: c2i checkpoints live under
+# the FoundationVision org, t2i checkpoints live under the original
+# peizesun/llamagen_t2i mirror (per LlamaGen's README, model zoo section).
+LLAMAGEN_REPOS = {
+    "FoundationVision/LlamaGen": [
+        "c2i_3B_384.pt",        # ~11.8 GB -- c2i pilot target
+        "c2i_XXL_384.pt",       # ~5.4 GB  -- alt c2i scale point
+        "vq_ds16_c2i.pt",       # ~0.3 GB  -- VQ tokenizer for c2i
+    ],
+    "peizesun/llamagen_t2i": [
+        "t2i_XL_stage2_512.pt", # LlamaGen-XL Stage II (512x512, 32x32 grid)
+        "vq_ds16_t2i.pt",       # VQ tokenizer for t2i
+    ],
+}
 
 # FLAN-T5-XL: keep the pytorch_model.bin shards (T5Embedder hardcodes those).
 T5_FILES = [
@@ -57,7 +64,6 @@ def main():
                    help="$DFLASH_PRETRAINED (e.g. /scratch300/$USER/dflash_vlm/pretrained)")
     p.add_argument("--skip-llamagen", action="store_true")
     p.add_argument("--skip-t5", action="store_true")
-    p.add_argument("--llamagen-repo", default="FoundationVision/LlamaGen")
     p.add_argument("--t5-repo", default="google/flan-t5-xl")
     args = p.parse_args()
 
@@ -65,12 +71,13 @@ def main():
         llamagen_dir = os.path.join(args.out_dir, "llamagen")
         os.makedirs(llamagen_dir, exist_ok=True)
         print(f"\n=== LlamaGen weights -> {llamagen_dir}")
-        for f in LLAMAGEN_FILES:
-            try:
-                fetch(args.llamagen_repo, f, llamagen_dir)
-            except Exception as e:
-                print(f"  [FAIL] {f}: {type(e).__name__}: {e}", flush=True)
-                sys.exit(1)
+        for repo_id, files in LLAMAGEN_REPOS.items():
+            for f in files:
+                try:
+                    fetch(repo_id, f, llamagen_dir)
+                except Exception as e:
+                    print(f"  [FAIL] {f}: {type(e).__name__}: {e}", flush=True)
+                    sys.exit(1)
 
     if not args.skip_t5:
         t5_dir = os.path.join(args.out_dir, "t5", "flan-t5-xl")
