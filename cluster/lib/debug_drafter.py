@@ -329,7 +329,8 @@ def main():
     target_probs = F.softmax(target_logits_block, dim=-1)
     target_top1_prob = target_probs.gather(-1, target_argmax.unsqueeze(-1)).squeeze(-1)
     target_top1_prob_mean = target_top1_prob.mean(dim=(0, 1)).cpu().tolist()
-    target_entropy = -(target_probs * target_probs.clamp_min(1e-30).log()).sum(-1).mean(dim=(0, 1)).cpu().tolist()
+    target_entropy_t = -(target_probs * target_probs.clamp_min(1e-30).log()).sum(-1).mean(dim=(0, 1))
+    target_entropy = target_entropy_t.cpu().tolist()
 
     dlog("H_M", "debug_drafter.py:target_argmax_metric",
          "drafter top-1 vs TARGET top-1 (right metric for spec decoding) + target's distribution stats",
