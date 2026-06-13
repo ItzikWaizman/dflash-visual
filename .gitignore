@@ -1,0 +1,50 @@
+# venvs / python
+venv_poc/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# data + intermediates
+data/
+checkpoints/
+checkpoints_smoke/
+results_smoke*
+results_real*
+
+# downloaded model weights
+LlamaGen/pretrained_models/
+**/pretrained_models/
+**/t5-ckpt/
+**/*.bin
+**/*.safetensors
+LlamaGen/**/*.pt
+!LlamaGen/**/configs/**/*.pt
+# our own checkpoints
+*.pt
+*.pth
+
+# logs + runs
+*.log
+output_logs/
+logs/
+runs/
+*.jsonl
+!train_log_schema.jsonl
+
+# generated samples / plots
+*.png
+*.jpg
+*.jpeg
+!docs/**/*.png
+!docs/**/*.jpg
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# transient tool outputs
+agent-tools/

@@ -1,0 +1,56 @@
+{
+  "experiment_name": "llamagen_3b_c2i_384",
+  "task": "c2i",
+  "target": {
+    "family": "llamagen",
+    "gpt_model": "GPT-3B",
+    "gpt_ckpt_rel": "llamagen/c2i_3B_384.pt",
+    "vq_model": "VQ-16",
+    "vq_ckpt_rel": "llamagen/vq_ds16_c2i.pt",
+    "image_size": 384,
+    "downsample_size": 16,
+    "codebook_size": 16384,
+    "codebook_embed_dim": 8,
+    "cls_token_num": 1,
+    "precision": "bf16",
+    "num_classes": 1000
+  },
+  "sampling": {
+    "cfg_scale": 4.0,
+    "temperature": 1.0,
+    "top_k": 2000
+  },
+  "datagen": {
+    "per_class": 60,
+    "num_classes": 1000,
+    "shard_size": 1200,
+    "batch": 12,
+    "compile": true,
+    "seed": 42,
+    "num_array_tasks": 4
+  },
+  "drafter": {
+    "num_layers": 5,
+    "num_features": 5,
+    "block_size": 16
+  },
+  "train": {
+    "anchors": 32,
+    "batch_seqs": 4,
+    "accum": 4,
+    "epochs": 4,
+    "lr": 4e-4,
+    "weight_decay": 0.01,
+    "gamma": 7.0,
+    "clip": 1.0,
+    "log_every": 50,
+    "ckpt_every": 500,
+    "probe_every": 1500,
+    "seed": 0
+  },
+  "eval": {
+    "classes": [207, 360, 387, 974, 88, 979, 417, 279, 933, 207, 387, 974, 88, 979, 417, 279],
+    "seeds": [0, 1],
+    "modes": ["greedy", "gumbel", "stochastic"]
+  }
+}

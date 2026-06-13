@@ -1,0 +1,62 @@
+{
+  "experiment_name": "llamagen_xl_t2i_stage2",
+  "task": "t2i",
+  "target": {
+    "family": "llamagen",
+    "gpt_model": "GPT-XL",
+    "gpt_ckpt_rel": "llamagen/t2i_XL_stage2_512.pt",
+    "vq_model": "VQ-16",
+    "vq_ckpt_rel": "llamagen/vq_ds16_t2i.pt",
+    "image_size": 512,
+    "downsample_size": 16,
+    "codebook_size": 16384,
+    "codebook_embed_dim": 8,
+    "cls_token_num": 120,
+    "precision": "bf16"
+  },
+  "text_encoder": {
+    "model": "flan-t5-xl",
+    "feature_max_len": 120,
+    "feature_dim": 2048,
+    "cache_rel": "t5"
+  },
+  "sampling": {
+    "cfg_scale": 7.5,
+    "temperature": 1.0,
+    "top_k": 1000
+  },
+  "datagen": {
+    "prompts_file_rel": "coco/captions_train2017.jsonl",
+    "num_sequences": 60000,
+    "shard_size": 1000,
+    "batch": 8,
+    "compile": true,
+    "seed": 42,
+    "num_array_tasks": 4
+  },
+  "drafter": {
+    "num_layers": 5,
+    "num_features": 5,
+    "block_size": 16
+  },
+  "train": {
+    "anchors": 24,
+    "batch_seqs": 4,
+    "accum": 4,
+    "epochs": 4,
+    "lr": 4e-4,
+    "weight_decay": 0.01,
+    "gamma": 7.0,
+    "clip": 1.0,
+    "log_every": 50,
+    "ckpt_every": 500,
+    "probe_every": 1500,
+    "seed": 0
+  },
+  "eval": {
+    "prompts_file_rel": "coco/captions_val2017.jsonl",
+    "num_prompts": 32,
+    "seeds": [0, 1],
+    "modes": ["greedy", "gumbel", "stochastic"]
+  }
+}
