@@ -14,7 +14,8 @@ source /scratch300/$USER/env.sh
 module load anaconda
 conda activate /scratch300/$USER/conda_envs/unlearning
 
-source "$(dirname "$0")/../env.sh"
+test -f cluster/env.sh || { echo "ERROR: cluster/env.sh not found. Did sbatch get --chdir to the repo root?" >&2; exit 1; }
+source ./cluster/env.sh
 
 OUT="$DFLASH_DATA/coco"
 mkdir -p "$OUT"
