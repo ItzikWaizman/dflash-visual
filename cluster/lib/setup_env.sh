@@ -6,9 +6,9 @@
 #   sbatch -A gpu-tad-wolf_v2 -p gpu-tad-pool --qos=owner \
 #          --gres=gpu:1 --time=2:00:00 \
 #          --cpus-per-task=2 --mem=16G \
-#          --chdir /scratch300/$USER/dflash_visual/code \
-#          -o /scratch300/$USER/dflash_visual/setup_env.log \
-#          cluster/scripts/setup_env.sh
+#          --chdir /scratch300/$USER/dflash_vlm/dflash-visual/ \
+#          -o output_logs/setup_env.out \
+#          cluster/lib/setup_env.sh
 set -euo pipefail
 
 source /scratch300/$USER/env.sh
@@ -48,15 +48,15 @@ except Exception as e:
 PY
 
 # ---- pretrained weights ------------------------------------------------------
-# Weight downloads are NOT done here -- many clusters block outbound HTTPS from
-# compute nodes. Run cluster/lib/download_weights.sh on the LOGIN node instead.
+# Weight downloads are handled by a separate sbatch job (no GPU needed):
+#   sbatch ... --chdir .../dflash-visual/ cluster/lib/download_weights.sh
 mkdir -p "$DFLASH_PRETRAINED/llamagen" "$DFLASH_PRETRAINED/t5"
 if compgen -G "$DFLASH_PRETRAINED/llamagen/*.pt" > /dev/null; then
     echo "[setup] LlamaGen weights present in $DFLASH_PRETRAINED/llamagen:"
     ls -lh "$DFLASH_PRETRAINED/llamagen"
 else
     echo "[setup] LlamaGen weights NOT yet downloaded."
-    echo "        Run: bash cluster/lib/download_weights.sh   (from a login node)"
+    echo "        Submit: sbatch ... --chdir <repo> cluster/lib/download_weights.sh"
 fi
 
 echo "[setup] DONE"
