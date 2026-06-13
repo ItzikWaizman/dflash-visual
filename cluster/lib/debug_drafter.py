@@ -25,6 +25,7 @@ import time
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 
 ROOT_LIB = os.path.dirname(os.path.abspath(__file__))      # .../cluster/lib
 REPO = os.path.dirname(os.path.dirname(ROOT_LIB))           # repo root
@@ -271,6 +272,76 @@ def main():
              "acc1_real_vs_zeroctx": [acc_train[0], acc_noctx[0]],
              "delta_acc1_from_ctx": acc_train[0] - acc_noctx[0],
              "delta_acc8_from_ctx": acc_train[7] - acc_noctx[7],
+         })
+
+    # ------------ H_J: drafter parameter health ------------
+    # Drafter init: linear weights N(0, 0.02), residual-scaled wo/w2 N(0, 0.02/sqrt(2*5)=0.00632),
+    # RMSNorm weights init=1.0, mask_embedding N(0, 0.02). Bias-less, so no biases.
+    # If a param's stats are exactly the init's stats, training didn't move it.
+    param_stats = {}
+    for name, pp in drafter.named_parameters():
+        s = pp.detach().float()
+        param_stats[name] = {
+            "shape": list(s.shape),
+            "rms": s.pow(2).mean().sqrt().item(),
+            "mean": s.mean().item(),
+            "std": s.std().item(),
+            "min": s.min().item(),
+            "max": s.max().item(),
+        }
+    dlog("H_J", "debug_drafter.py:param_health",
+         "drafter param stats; check if training actually moved weights vs init",
+         {"params": param_stats})
+
+    # ------------ H_M: drafter argmax vs TARGET argmax (the right metric) ------------
+    # Re-run target to also grab its full-sequence logits (not captured by hooks).
+    idx_seq = toks[:, :NUM_TOKENS - 1].to(device)
+    seq_len_full = cls_tok + idx_seq.shape[1]
+    ip_full = torch.arange(seq_len_full, device=device)
+    with torch.no_grad():
+        target_logits_all, _ = target(idx_seq, cond_idx=t5, input_pos=ip_full, targets=None)
+    # target_logits_all has shape (B, cls_tok + N-1, V). Position k of this tensor is the
+    # NEXT-TOKEN prediction for what comes at sequence position k+1.
+    # Image position p corresponds to sequence position cls_tok + p.
+    # To compare drafter's prediction at image position p+1 (i.e. tokens[p+1]), use
+    # target's logits at sequence position cls_tok + p, i.e. block_pos_img[:, :, :-1] + cls_tok.
+    seq_pos = cls_tok + block_pos_img[:, :, :-1]                    # (B, A, 15)
+    B_, A_, K_ = seq_pos.shape
+    V = target_logits_all.shape[-1]
+    target_logits_block = torch.gather(
+        target_logits_all, dim=1,
+        index=seq_pos.reshape(B_, -1).unsqueeze(-1).expand(-1, -1, V),
+    ).view(B_, A_, K_, V).float()                                   # (B, A, 15, V)
+
+    target_argmax = target_logits_block.argmax(-1)                  # (B, A, 15)
+    drafter_argmax = logits_train.argmax(-1)                        # (B, A, 15), train regime
+    drafter_argmax_eval = logits_eval.argmax(-1)                    # eval regime
+
+    agree_target_train = (drafter_argmax == target_argmax).float().mean(dim=(0, 1)).cpu().tolist()
+    agree_target_eval = (drafter_argmax_eval == target_argmax).float().mean(dim=(0, 1)).cpu().tolist()
+
+    target_top5 = target_logits_block.topk(5, dim=-1).indices       # (B, A, 15, 5)
+    in_top5 = (drafter_argmax.unsqueeze(-1) == target_top5).any(-1).float().mean(dim=(0, 1)).cpu().tolist()
+    target_top20 = target_logits_block.topk(20, dim=-1).indices
+    in_top20 = (drafter_argmax.unsqueeze(-1) == target_top20).any(-1).float().mean(dim=(0, 1)).cpu().tolist()
+
+    target_argmax_eq_data = (target_argmax == labels_blk).float().mean(dim=(0, 1)).cpu().tolist()
+    target_probs = F.softmax(target_logits_block, dim=-1)
+    target_top1_prob = target_probs.gather(-1, target_argmax.unsqueeze(-1)).squeeze(-1)
+    target_top1_prob_mean = target_top1_prob.mean(dim=(0, 1)).cpu().tolist()
+    target_entropy = -(target_probs * target_probs.clamp_min(1e-30).log()).sum(-1).mean(dim=(0, 1)).cpu().tolist()
+
+    dlog("H_M", "debug_drafter.py:target_argmax_metric",
+         "drafter top-1 vs TARGET top-1 (right metric for spec decoding) + target's distribution stats",
+         {
+             "acc_vs_DATA_SAMPLE": acc_train,
+             "acc_vs_TARGET_ARGMAX": agree_target_train,
+             "acc_vs_TARGET_ARGMAX_eval_regime": agree_target_eval,
+             "drafter_top1_in_target_TOP5": in_top5,
+             "drafter_top1_in_target_TOP20": in_top20,
+             "target_argmax_matches_DATA_sample": target_argmax_eq_data,
+             "target_top1_prob_per_pos": target_top1_prob_mean,
+             "target_entropy_per_pos": target_entropy,
          })
 
     print("[debug] done; log at " + LOG_PATH, flush=True)
