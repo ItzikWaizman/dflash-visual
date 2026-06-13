@@ -30,11 +30,16 @@ the repo so you can pull + submit a single command.
 
 ## 2. The one-line `sbatch` format
 
-Every sbatch command I give you obeys this template (single line):
+Every sbatch command I give you obeys this template (single line). **The
+executable script is always the last token** (no positional args after it):
 
 ```
-sbatch -A gpu-tad-wolf_v2 -p gpu-tad-pool --qos=owner --gres=gpu:1 --time=<HH:MM:SS> --cpus-per-task=<N> --mem=<XG> -o output_logs/<jobname>.out --job-name=<jobname> --chdir /scratch300/$USER/dflash_vlm/dflash-visual/ ./cluster/lib/<wrapper>.sh <args>
+sbatch -A gpu-tad-wolf_v2 -p gpu-tad-pool --qos=owner --gres=gpu:1 --time=<HH:MM:SS> --cpus-per-task=<N> --mem=<XG> -o output_logs/<jobname>.out --job-name=<jobname> --chdir /scratch300/$USER/dflash_vlm/dflash-visual/ ./cluster/experiments/<exp>/<phase>.sh
 ```
+
+Per-experiment thin wrappers (`./cluster/experiments/<exp>/{datagen,train,eval}.sh`)
+each just `exec ./cluster/lib/<phase>.sh <exp>`, so the lib wrappers stay generic
+while the sbatch line ends cleanly with no args.
 
 **Hard rules** (every time, no exceptions):
 
@@ -117,14 +122,15 @@ give you per fresh checkout).
 ```
 cluster/experiments/<exp>/
     config.json     # all hyperparams + paths the python scripts read
-    run.sh          # optional: pipeline launcher that chains datagen -> train -> eval
-    README.md       # one-paragraph "what / why / expected speedup"
+    datagen.sh      # thin wrapper: `exec ./cluster/lib/datagen.sh <exp>`
+    train.sh        # thin wrapper: `exec ./cluster/lib/train.sh <exp>`
+    eval.sh         # thin wrapper: `exec ./cluster/lib/eval.sh <exp>`
 ```
 
-Generic wrappers (`cluster/lib/datagen.sh`, `train.sh`, `eval.sh`) dispatch to
-the right Python script based on `config.json::task` (`c2i` or `t2i`). I
-**don't** create per-experiment `datagen.sh` / `train.sh` / `eval.sh` — the
-generic ones cover all current experiments.
+The generic `cluster/lib/{datagen,train,eval}.sh` wrappers carry the real logic
+(env activation, env.sh source, Python dispatch by `config.json::task`). The
+per-experiment wrappers exist purely so the sbatch one-liner ends with the
+script and no positional args.
 
 ---
 
