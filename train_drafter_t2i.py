@@ -80,37 +80,45 @@ def build_attn_mask(anchors_img, ctx_len, block, device):
 
 
 @torch.no_grad()
-def extract_features_t2i(target, capture, tokens, t5_feats, num_tokens, cls_token_num, device):
+def extract_features_t2i(target, capture, tokens, t5_feats, num_tokens, cls_token_num, device,
+                          return_target_argmax=False):
     """tokens (B, N); t5_feats (B, 120, 2048) bf16. Returns IMAGE-position hidden
-    states (B, N, 5D) — text positions stripped."""
-    # Feed all but the last image token (matches c2i convention).
+    states (B, N, 5D) — text positions stripped.
+
+    If return_target_argmax=True, also returns the target's argmax over its
+    full-sequence logits (B, cls_token_num + N - 1) so the train loop can log
+    `acc_vs_target_argmax` — the metric that actually predicts real speculative-
+    decoding tau (see Debug Mode session a22afb, hypothesis H_M).
+    """
     idx = tokens[:, : num_tokens - 1].to(device)
     cond = t5_feats.to(device)
-    # Training forward concatenates [cond_emb (120), token_emb (N-1)] inside target.
-    # The target is in eval mode (frozen, no dropout). LlamaGen's eval path indexes
-    # freqs_cis by input_pos; pass an explicit arange so it gets the right slice
-    # (otherwise input_pos=None would return all 1144 positions for a 1143-token seq).
-    seq_len = cls_token_num + idx.shape[1]                     # 120 + (N-1)
+    seq_len = cls_token_num + idx.shape[1]
     input_pos = torch.arange(seq_len, device=device)
-    target(idx, cond_idx=cond, input_pos=input_pos, targets=None)
-    raw_all = capture.concat(cond_only=False)                  # (B, 120+N-1, 5D)
-    # Strip the 120 text positions; we only condition the drafter on image features.
-    return raw_all[:, cls_token_num:, :]                       # (B, N-1, 5D)
+    logits_all, _ = target(idx, cond_idx=cond, input_pos=input_pos, targets=None)
+    raw_all = capture.concat(cond_only=False)
+    feats = raw_all[:, cls_token_num:, :]
+    if return_target_argmax:
+        # argmax is tiny (B, seq_len) int64 — keep around; drop fp32 logits ASAP.
+        target_argmax_all = logits_all.argmax(-1)
+        return feats, target_argmax_all
+    return feats
 
 
 def make_optimizer(drafter, lr, wd):
+    """torch.AdamW with fp32 master state. We deliberately do NOT use
+    bnb.AdamW8bit anymore: when the model was stored in bf16, Adam updates of
+    magnitude ~lr=4e-4 around 1.0 (RMSNorm gains) fell below bf16 mantissa
+    precision (~2^-7=0.0078) and were silently rounded to zero. Confirmed by
+    Debug Mode session a22afb (H_J): all 22 RMSNorm.weight vectors stayed at
+    init=1.0 with std=0 after 15K steps. Drafter is now in fp32 master copies;
+    keep the optimizer state in fp32 too."""
     decay, no_decay = [], []
     for _, p in drafter.named_parameters():
         (no_decay if p.dim() < 2 else decay).append(p)
     groups = [{"params": decay, "weight_decay": wd},
               {"params": no_decay, "weight_decay": 0.0}]
-    try:
-        import bitsandbytes as bnb
-        opt = bnb.optim.AdamW8bit(groups, lr=lr, betas=(0.9, 0.95))
-        print("optimizer: bitsandbytes AdamW8bit", flush=True)
-    except Exception as e:
-        opt = torch.optim.AdamW(groups, lr=lr, betas=(0.9, 0.95))
-        print(f"optimizer: torch AdamW [{type(e).__name__}]", flush=True)
+    opt = torch.optim.AdamW(groups, lr=lr, betas=(0.9, 0.95))
+    print("optimizer: torch AdamW (fp32 master)", flush=True)
     return opt
 
 
@@ -151,10 +159,14 @@ def main():
     print(f"[t2i train] feature layers {capture.layer_ids} | "
           f"GPU {torch.cuda.memory_allocated()/1e9:.1f} GB", flush=True)
 
+    # Keep drafter parameters in FP32 (master copies) — Debug Mode session
+    # a22afb confirmed bf16 storage swallowed RMSNorm gain updates (H_J).
+    # autocast(bf16) below makes the forward run at bf16 speed without sacrificing
+    # the precision of the underlying parameter updates.
     drafter = VisualDFlashDrafter(dim=target.config.dim, n_head=target.config.n_head,
                                   num_layers=dr["num_layers"],
                                   num_features=dr["num_features"],
-                                  block_size=BLOCK).to(device=device, dtype=torch.bfloat16)
+                                  block_size=BLOCK).to(device=device)
     drafter.train()
     n_params = sum(p_.numel() for p_ in drafter.parameters())
     print(f"[t2i train] drafter: {n_params/1e6:.0f}M trainable params", flush=True)
@@ -199,7 +211,10 @@ def main():
     log_path = os.path.join(args.run_dir, "logs", "train_log.jsonl")
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
     gen = torch.Generator()
-    run_loss, run_acc, run_n = 0.0, torch.zeros(BLOCK - 1, device=device), 0
+    run_loss = 0.0
+    run_acc_data = torch.zeros(BLOCK - 1, device=device)
+    run_acc_target = torch.zeros(BLOCK - 1, device=device)
+    run_n = 0
     t_last, seen = time.perf_counter(), 0
 
     optim_step = start
@@ -219,45 +234,68 @@ def main():
                 t5_feats = t5_feats_all[pids]          # (B, 120, 2048)
                 B = toks.shape[0]
 
-                raw = extract_features_t2i(target, capture, toks, t5_feats,
-                                           NUM_TOKENS, cls_tok, device)  # (B, N-1, 5D)
-                fused_ctx = drafter.fuse(raw)
+                # Capture target features AND target's full-sequence argmax so we
+                # can log acc_vs_target during training (Debug Mode H_M: this is
+                # the metric that actually predicts speculative-decoding tau).
+                raw, target_argmax_all = extract_features_t2i(
+                    target, capture, toks, t5_feats, NUM_TOKENS, cls_tok, device,
+                    return_target_argmax=True,
+                )
 
-                ctx_len = NUM_TOKENS - 1
-                # anchors in image coords; anchor p means block [p+1..p+BLOCK],
-                # context = image positions 0..p
-                anchors = torch.randint(0, ctx_len - BLOCK + 1, (B, tr["anchors"]),
-                                        device=device)  # image-coord anchor in [0, N-1-BLOCK]
-                toks_dev = toks.to(device)
-                # anchor token: tokens[p] (image position p)
-                anchor_tok = toks_dev.gather(1, anchors)
-                anchor_emb = target.tok_embeddings(anchor_tok)         # (B, A, D)
-                mask_emb = drafter.mask_embedding.to(anchor_emb.dtype)
-                block_emb = torch.cat([
-                    anchor_emb.unsqueeze(2),
-                    mask_emb.view(1, 1, 1, -1).expand(B, tr["anchors"], BLOCK - 1, -1)],
-                    dim=2).reshape(B, tr["anchors"] * BLOCK, -1)
+                # autocast runs the drafter's compute in bf16 (fast on A100/H100)
+                # while parameters and gradients remain fp32 (fixes H_J).
+                with torch.autocast(device_type="cuda", dtype=torch.bfloat16):
+                    fused_ctx = drafter.fuse(raw)
 
-                # block IMAGE positions: [p, p+1, ..., p+BLOCK-1]; RoPE in target coord = +cls
-                block_pos_img = anchors.unsqueeze(-1) + torch.arange(BLOCK, device=device)
-                block_freqs = freqs[(cls_tok + block_pos_img).reshape(B, -1)]
-                attn_mask = build_attn_mask(anchors, ctx_len, BLOCK, device)
+                    ctx_len = NUM_TOKENS - 1
+                    # anchors in image coords; anchor p means block [p+1..p+BLOCK],
+                    # context = image positions 0..p
+                    anchors = torch.randint(0, ctx_len - BLOCK + 1, (B, tr["anchors"]),
+                                            device=device)
+                    toks_dev = toks.to(device)
+                    anchor_tok = toks_dev.gather(1, anchors)
+                    anchor_emb = target.tok_embeddings(anchor_tok)
+                    mask_emb = drafter.mask_embedding.to(anchor_emb.dtype)
+                    block_emb = torch.cat([
+                        anchor_emb.unsqueeze(2),
+                        mask_emb.view(1, 1, 1, -1).expand(B, tr["anchors"], BLOCK - 1, -1)],
+                        dim=2).reshape(B, tr["anchors"] * BLOCK, -1)
 
-                hid = drafter.forward_train(fused_ctx, ctx_freqs, block_emb,
-                                            block_freqs, attn_mask)
-                hid = hid.view(B, tr["anchors"], BLOCK, -1)[:, :, 1:, :]
-                logits = target.output(drafter.norm(hid)).float()       # (B,A,15,V)
+                    block_pos_img = anchors.unsqueeze(-1) + torch.arange(BLOCK, device=device)
+                    block_freqs = freqs[(cls_tok + block_pos_img).reshape(B, -1)]
+                    attn_mask = build_attn_mask(anchors, ctx_len, BLOCK, device)
 
-                # labels for block positions p+1..p+15 = tokens[p+1..p+15]
-                lab_idx = block_pos_img[:, :, 1:]                       # (B,A,15)
-                labels_blk = toks_dev.gather(1, lab_idx.reshape(B, -1)).view(B, tr["anchors"], BLOCK - 1)
+                    hid = drafter.forward_train(fused_ctx, ctx_freqs, block_emb,
+                                                block_freqs, attn_mask)
+                    # forward_train already applies self.norm(x) at its end; the
+                    # previous code re-applied drafter.norm here which (a) doubled
+                    # the norm vs the inference path's single norm and (b) would
+                    # cause a train/eval mismatch once norm.weight starts moving
+                    # (fp32 fix above). Match inference: drop the extra norm.
+                    hid = hid.view(B, tr["anchors"], BLOCK, -1)[:, :, 1:, :]
+                    logits = target.output(hid).float()                  # (B,A,15,V)
 
-                ce = F.cross_entropy(logits.permute(0, 3, 1, 2), labels_blk, reduction="none")
-                loss = (ce * loss_w.view(1, 1, -1)).mean()
+                    lab_idx = block_pos_img[:, :, 1:]                    # (B,A,15)
+                    labels_blk = toks_dev.gather(1, lab_idx.reshape(B, -1)
+                                                 ).view(B, tr["anchors"], BLOCK - 1)
+
+                    ce = F.cross_entropy(logits.permute(0, 3, 1, 2), labels_blk, reduction="none")
+                    loss = (ce * loss_w.view(1, 1, -1)).mean()
+
                 (loss / tr["accum"]).backward()
 
                 with torch.no_grad():
-                    run_acc += (logits.argmax(-1) == labels_blk).float().mean(dim=(0, 1))
+                    # acc vs the sampled training token (old metric; H_M shows it
+                    # ceilings around 0.25 due to broad target distribution)
+                    drafter_pred = logits.argmax(-1)
+                    run_acc_data += (drafter_pred == labels_blk).float().mean(dim=(0, 1))
+                    # acc vs target's own argmax at the same positions — the real
+                    # spec-decoding metric (H_M)
+                    seq_pos_target = cls_tok + block_pos_img[:, :, :-1]    # (B, A, 15)
+                    target_argmax_at_lab = torch.gather(
+                        target_argmax_all, dim=1, index=seq_pos_target.reshape(B, -1),
+                    ).view(B, tr["anchors"], BLOCK - 1)
+                    run_acc_target += (drafter_pred == target_argmax_at_lab).float().mean(dim=(0, 1))
                     run_loss += loss.item()
                     run_n += 1
                 seen += B
@@ -268,24 +306,41 @@ def main():
             optim_step += 1
 
             if optim_step % tr["log_every"] == 0:
-                acc = (run_acc / run_n).cpu().tolist()
-                prod, tau_proxy = 1.0, 1.0
-                for a in acc:
+                acc_data = (run_acc_data / run_n).cpu().tolist()
+                acc_target = (run_acc_target / run_n).cpu().tolist()
+                # tau proxy from the RIGHT metric (vs target argmax)
+                prod, tau_target = 1.0, 1.0
+                for a in acc_target:
                     prod *= a
-                    tau_proxy += prod
+                    tau_target += prod
+                # tau proxy from old metric (vs data sample) — kept for comparison
+                prod, tau_data = 1.0, 1.0
+                for a in acc_data:
+                    prod *= a
+                    tau_data += prod
+                # RMSNorm gain health check (H_J): track if gains actually move
+                norm_w_std = float(drafter.norm.weight.detach().float().std().item())
+                norm_w_max = float(drafter.norm.weight.detach().float().max().item())
+                norm_w_min = float(drafter.norm.weight.detach().float().min().item())
                 dt = time.perf_counter() - t_last
                 sps = seen / dt
-                rec = {"step": optim_step, "epoch": epoch, "loss": run_loss / run_n,
-                       "acc1": acc[0], "acc8": acc[7], "acc15": acc[14],
-                       "tau_proxy": tau_proxy, "lr": sched.get_last_lr()[0],
-                       "seq_per_s": sps,
-                       "eta_h": (total_steps - optim_step) * micro / sps / 3600}
+                rec = {
+                    "step": optim_step, "epoch": epoch,
+                    "loss": run_loss / run_n,
+                    "acc1_target": acc_target[0],  "acc8_target": acc_target[7],  "acc15_target": acc_target[14],
+                    "acc1_data":   acc_data[0],    "acc8_data":   acc_data[7],    "acc15_data":   acc_data[14],
+                    "tau_target": tau_target, "tau_data": tau_data,
+                    "norm_w_std": norm_w_std, "norm_w_min": norm_w_min, "norm_w_max": norm_w_max,
+                    "lr": sched.get_last_lr()[0], "seq_per_s": sps,
+                    "eta_h": (total_steps - optim_step) * micro / sps / 3600,
+                }
                 print(json.dumps({k: round(v, 4) if isinstance(v, float) else v
                                   for k, v in rec.items()}), flush=True)
                 with open(log_path, "a", encoding="utf-8") as f:
                     f.write(json.dumps(rec) + "\n")
                 run_loss, run_n = 0.0, 0
-                run_acc.zero_()
+                run_acc_data.zero_()
+                run_acc_target.zero_()
                 t_last, seen = time.perf_counter(), 0
 
             if optim_step % tr["ckpt_every"] == 0 or optim_step == total_steps:

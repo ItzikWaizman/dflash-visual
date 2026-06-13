@@ -43,7 +43,7 @@
     "anchors": 24,
     "batch_seqs": 4,
     "accum": 4,
-    "epochs": 4,
+    "epochs": 8,
     "lr": 4e-4,
     "weight_decay": 0.01,
     "gamma": 7.0,
