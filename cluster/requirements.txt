@@ -22,3 +22,6 @@ beautifulsoup4>=4.12
 # Image / utility.
 Pillow>=10.0
 tqdm>=4.66
+
+# Parquet (HF mirror of COCO Karpathy captions ships as parquet).
+pyarrow>=15
