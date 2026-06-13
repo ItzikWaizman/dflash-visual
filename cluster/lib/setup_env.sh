@@ -48,23 +48,15 @@ except Exception as e:
 PY
 
 # ---- pretrained weights ------------------------------------------------------
-echo "[setup] downloading LlamaGen pretrained weights to $DFLASH_PRETRAINED/llamagen"
-mkdir -p "$DFLASH_PRETRAINED/llamagen"
-cd "$DFLASH_PRETRAINED/llamagen"
-download() {
-    [ -f "$2" ] && { echo "  already have $2"; return 0; }
-    echo "  fetching $2"
-    wget -q --show-progress -O "$2" "$1"
-}
-# c2i targets + VQ tokenizer (small + 3B, 384x384)
-download https://huggingface.co/peizesun/llamagen/resolve/main/c2i_3B_384.pt c2i_3B_384.pt
-download https://huggingface.co/peizesun/llamagen/resolve/main/c2i_XXL_384.pt c2i_XXL_384.pt
-download https://huggingface.co/peizesun/llamagen/resolve/main/vq_ds16_c2i.pt vq_ds16_c2i.pt
-# t2i: XL Stage 2 (512x512) + matching VQ tokenizer
-download https://huggingface.co/peizesun/llamagen/resolve/main/t2i_XL_stage2_512.pt t2i_XL_stage2_512.pt
-download https://huggingface.co/peizesun/llamagen/resolve/main/vq_ds16_t2i.pt vq_ds16_t2i.pt
-
-echo "[setup] T5 weights will lazy-download via T5Embedder into $DFLASH_PRETRAINED/t5"
-mkdir -p "$DFLASH_PRETRAINED/t5"
+# Weight downloads are NOT done here -- many clusters block outbound HTTPS from
+# compute nodes. Run cluster/lib/download_weights.sh on the LOGIN node instead.
+mkdir -p "$DFLASH_PRETRAINED/llamagen" "$DFLASH_PRETRAINED/t5"
+if compgen -G "$DFLASH_PRETRAINED/llamagen/*.pt" > /dev/null; then
+    echo "[setup] LlamaGen weights present in $DFLASH_PRETRAINED/llamagen:"
+    ls -lh "$DFLASH_PRETRAINED/llamagen"
+else
+    echo "[setup] LlamaGen weights NOT yet downloaded."
+    echo "        Run: bash cluster/lib/download_weights.sh   (from a login node)"
+fi
 
 echo "[setup] DONE"

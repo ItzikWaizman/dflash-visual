@@ -60,19 +60,21 @@ mkdir -p /scratch300/$USER/dflash_vlm
 cd /scratch300/$USER/dflash_vlm
 git clone https://github.com/ItzikWaizman/dflash-visual.git
 
-# install our deps into the existing `unlearning` conda env + download LlamaGen weights
+# 1. install deps into the existing `unlearning` conda env (compute node, GPU
+#    needed to smoke-test torch+CUDA imports)
 sbatch -A gpu-tad-wolf_v2 -p gpu-tad-pool --qos=owner \
        --gres=gpu:1 --time=2:00:00 --cpus-per-task=2 --mem=16G \
        --chdir /scratch300/$USER/dflash_vlm/dflash-visual \
        -o /scratch300/$USER/dflash_vlm/setup_env.log \
        cluster/lib/setup_env.sh
 
-# COCO captions for t2i prompts
-sbatch -A gpu-tad-wolf_v2 -p gpu-tad-pool --qos=owner \
-       --gres=gpu:1 --cpus-per-task=2 --time=1:00:00 --mem=8G \
-       --chdir /scratch300/$USER/dflash_vlm/dflash-visual \
-       -o /scratch300/$USER/dflash_vlm/fetch_coco.log \
-       cluster/lib/fetch_coco_captions.sh
+# 2. download LlamaGen weights  --  run on the LOGIN NODE, not via sbatch,
+#    because compute nodes typically have no outbound internet
+cd /scratch300/$USER/dflash_vlm/dflash-visual
+bash cluster/lib/download_weights.sh    # ~12 GB, ~10-20 minutes
+
+# 3. COCO captions for t2i prompts (also from login node -- needs internet)
+bash cluster/lib/fetch_coco_captions.sh
 ```
 
 ## Running an experiment
