@@ -26,11 +26,11 @@ cluster/
     ...                         add new experiments here
 ```
 
-Scratch tree (`$DFLASH_ROOT` = `/scratch300/$USER/dflash_visual` by default):
+Scratch tree (`$DFLASH_ROOT` = `/scratch300/$USER/dflash_vlm` by default):
 
 ```
 $DFLASH_ROOT/
-  code/                         git clone of this repo
+  dflash-visual/                git clone of this repo (= $DFLASH_CODE)
   pretrained/                   LlamaGen + T5 weights (shared across experiments)
   data/coco/                    COCO captions JSONL
   runs/<exp>/                   per-experiment outputs
@@ -56,22 +56,22 @@ in `lib/`) which sets `DFLASH_ROOT`, `DFLASH_CODE`, `DFLASH_PRETRAINED`,
 ## One-time setup
 
 ```bash
-mkdir -p /scratch300/$USER/dflash_visual
-cd /scratch300/$USER/dflash_visual
-git clone https://github.com/ItzikWaizman/dflash-visual.git code
+mkdir -p /scratch300/$USER/dflash_vlm
+cd /scratch300/$USER/dflash_vlm
+git clone https://github.com/ItzikWaizman/dflash-visual.git
 
 # install our deps into the existing `unlearning` conda env + download LlamaGen weights
 sbatch -A gpu-tad-wolf_v2 -p gpu-tad-pool --qos=owner \
        --gres=gpu:1 --time=2:00:00 --cpus-per-task=2 --mem=16G \
-       --chdir /scratch300/$USER/dflash_visual/code \
-       -o /scratch300/$USER/dflash_visual/setup_env.log \
+       --chdir /scratch300/$USER/dflash_vlm/dflash-visual \
+       -o /scratch300/$USER/dflash_vlm/setup_env.log \
        cluster/lib/setup_env.sh
 
-# COCO captions for t2i prompts (no GPU needed)
+# COCO captions for t2i prompts
 sbatch -A gpu-tad-wolf_v2 -p gpu-tad-pool --qos=owner \
-       --cpus-per-task=2 --time=1:00:00 --mem=8G \
-       --chdir /scratch300/$USER/dflash_visual/code \
-       -o /scratch300/$USER/dflash_visual/fetch_coco.log \
+       --gres=gpu:1 --cpus-per-task=2 --time=1:00:00 --mem=8G \
+       --chdir /scratch300/$USER/dflash_vlm/dflash-visual \
+       -o /scratch300/$USER/dflash_vlm/fetch_coco.log \
        cluster/lib/fetch_coco_captions.sh
 ```
 

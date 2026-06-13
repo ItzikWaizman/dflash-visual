@@ -5,8 +5,8 @@
 set -euo pipefail
 
 : "${SCRATCH:=/scratch300/$USER}"
-export DFLASH_ROOT="${SCRATCH}/dflash_visual"
-export DFLASH_CODE="${DFLASH_ROOT}/code"
+export DFLASH_ROOT="${DFLASH_ROOT:-${SCRATCH}/dflash_vlm}"
+export DFLASH_CODE="${DFLASH_CODE:-${DFLASH_ROOT}/dflash-visual}"
 export DFLASH_PRETRAINED="${DFLASH_ROOT}/pretrained"
 export DFLASH_DATA="${DFLASH_ROOT}/data"
 export DFLASH_RUNS="${DFLASH_ROOT}/runs"
