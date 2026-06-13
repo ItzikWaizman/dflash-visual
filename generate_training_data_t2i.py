@@ -27,6 +27,7 @@ import json
 import os
 import sys
 import time
+import zipfile
 
 import numpy as np
 import torch
@@ -92,9 +93,15 @@ def cache_t5_features(prompts: list, t5_path: str, t5_model_type: str,
         masks[s: s + emb.shape[0]] = m_flip.bool().cpu().numpy()
         if (s // bs) % 32 == 0:
             print(f"[t5] encoded {s + emb.shape[0]} / {N}", flush=True)
-    print(f"[t5] saving to {out_path}", flush=True)
-    np.savez_compressed(out_path, prompts=np.array(prompts, dtype=object),
+    # Atomic write: savez_compressed can take many minutes for ~30 GB files,
+    # during which the destination path "exists" but is a partial zip. Polling
+    # tasks would race on it. Write to .tmp, then atomically rename.
+    tmp_path = out_path + ".tmp"
+    print(f"[t5] saving to {tmp_path}", flush=True)
+    np.savez_compressed(tmp_path, prompts=np.array(prompts, dtype=object),
                         feats=feats.astype(np.float16), masks=masks)
+    os.replace(tmp_path, out_path)
+    print(f"[t5] renamed -> {out_path}", flush=True)
     del t5
     gc.collect()
     torch.cuda.empty_cache()
@@ -221,9 +228,21 @@ def main():
         while not os.path.exists(t5_cache):
             print(f"[task {args.array_id}] waiting for t5_features.npz ...", flush=True)
             time.sleep(30)
-        time.sleep(5)  # ensure write is complete
 
-    z = np.load(t5_cache, allow_pickle=True)
+    # Defensive load: even with atomic rename, retry on BadZipFile / OSError in
+    # case of slow NFS metadata propagation across nodes.
+    for attempt in range(20):
+        try:
+            z = np.load(t5_cache, allow_pickle=True)
+            _ = z["feats"].shape  # touch to force header read
+            break
+        except (zipfile.BadZipFile, OSError, ValueError) as e:
+            print(f"[task {args.array_id}] t5_features.npz not ready yet "
+                  f"(attempt {attempt + 1}/20: {type(e).__name__}); sleeping 30s",
+                  flush=True)
+            time.sleep(30)
+    else:
+        raise RuntimeError(f"t5_features.npz never became readable at {t5_cache}")
     # Direct fp16 -> bf16 conversion: avoids the 60 GB fp32 detour that would
     # otherwise dominate CPU RAM for 60K-prompt runs (~30 GB feats + ~30 GB bf16).
     feats_all = torch.from_numpy(z["feats"]).to(torch.bfloat16)
