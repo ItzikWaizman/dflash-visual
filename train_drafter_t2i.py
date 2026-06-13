@@ -87,7 +87,12 @@ def extract_features_t2i(target, capture, tokens, t5_feats, num_tokens, cls_toke
     idx = tokens[:, : num_tokens - 1].to(device)
     cond = t5_feats.to(device)
     # Training forward concatenates [cond_emb (120), token_emb (N-1)] inside target.
-    target(idx, cond_idx=cond, input_pos=None, targets=None)
+    # The target is in eval mode (frozen, no dropout). LlamaGen's eval path indexes
+    # freqs_cis by input_pos; pass an explicit arange so it gets the right slice
+    # (otherwise input_pos=None would return all 1144 positions for a 1143-token seq).
+    seq_len = cls_token_num + idx.shape[1]                     # 120 + (N-1)
+    input_pos = torch.arange(seq_len, device=device)
+    target(idx, cond_idx=cond, input_pos=input_pos, targets=None)
     raw_all = capture.concat(cond_only=False)                  # (B, 120+N-1, 5D)
     # Strip the 120 text positions; we only condition the drafter on image features.
     return raw_all[:, cls_token_num:, :]                       # (B, N-1, 5D)
