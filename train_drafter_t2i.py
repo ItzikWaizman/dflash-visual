@@ -159,7 +159,8 @@ def main():
     tokens_all, prompt_ids_all = load_dataset(data_dir)
     t5_cache = os.path.join(data_dir, "t5_features.npz")
     z = np.load(t5_cache, allow_pickle=True)
-    t5_feats_all = torch.from_numpy(z["feats"].astype(np.float32)).to(torch.bfloat16)
+    # Direct fp16 -> bf16 load: avoids the ~60 GB fp32 detour on 60K-prompt runs.
+    t5_feats_all = torch.from_numpy(z["feats"]).to(torch.bfloat16)
     print(f"[t2i train] T5 feats {tuple(t5_feats_all.shape)}", flush=True)
 
     N = tokens_all.shape[0]
