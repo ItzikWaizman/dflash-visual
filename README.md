@@ -33,13 +33,15 @@ python eval_real_drafter.py --ckpt checkpoints/latest.pt       # ~30min
 
 ## Cluster runs (paper experiments)
 
-See `cluster/README.md` for full instructions. TL;DR for a new experiment:
+See `cluster/README.md` for full instructions. Each experiment lives in a
+self-contained folder under `cluster/experiments/<EXP>/` (config + run + notes).
+TL;DR after one-time `setup_env.sh` + `fetch_coco_captions.sh`:
 
 ```
-EXP=llamagen_xl_t2i_stage2
-./cluster/scripts/pipeline.sh $EXP   # submits datagen -> train -> eval
-                                     # with --dependency=afterok chains
+./cluster/experiments/llamagen_xl_t2i_stage2/run.sh
 ```
+
+submits datagen -> train -> eval with proper `--dependency=afterok` chaining.
 
 The standard model set we benchmark on (each = one JSON config):
 

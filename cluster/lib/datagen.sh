@@ -17,7 +17,7 @@ conda activate /scratch300/$USER/conda_envs/unlearning
 source "$(dirname "$0")/../env.sh"
 
 EXP="${1:?usage: $0 <experiment_name>}"
-CONFIG="$DFLASH_CODE/cluster/configs/${EXP}.json"
+CONFIG="$DFLASH_CODE/cluster/experiments/${EXP}/config.json"
 RUN_DIR="$DFLASH_RUNS/${EXP}"
 LOG_DIR="$RUN_DIR/logs"
 mkdir -p "$LOG_DIR" "$RUN_DIR"
