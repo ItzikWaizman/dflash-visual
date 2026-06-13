@@ -224,7 +224,9 @@ def main():
         time.sleep(5)  # ensure write is complete
 
     z = np.load(t5_cache, allow_pickle=True)
-    feats_all = torch.from_numpy(z["feats"].astype(np.float32)).to(torch.bfloat16)
+    # Direct fp16 -> bf16 conversion: avoids the 60 GB fp32 detour that would
+    # otherwise dominate CPU RAM for 60K-prompt runs (~30 GB feats + ~30 GB bf16).
+    feats_all = torch.from_numpy(z["feats"]).to(torch.bfloat16)
     masks_all = torch.from_numpy(z["masks"])
     print(f"[task {args.array_id}] loaded T5 features {tuple(feats_all.shape)}",
           flush=True)

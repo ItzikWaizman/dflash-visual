@@ -32,7 +32,7 @@
     "batch": 8,
     "compile": true,
     "seed": 42,
-    "num_array_tasks": 4
+    "num_array_tasks": 6
   },
   "drafter": {
     "num_layers": 5,
