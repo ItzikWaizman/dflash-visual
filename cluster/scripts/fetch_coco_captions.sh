@@ -1,7 +1,18 @@
 #!/bin/bash
-# Download COCO 2017 captions and convert them to JSONL (one caption per line).
+# Download COCO 2017 captions and convert to JSONL (one caption per line).
 # Run once before t2i datagen. ~250 MB download, ~700K train / 25K val captions.
+#
+# Usage:
+#   sbatch -A gpu-tad-wolf_v2 -p gpu-tad-pool --qos=owner \
+#          --time=1:00:00 --cpus-per-task=2 --mem=8G \
+#          --chdir /scratch300/$USER/dflash_visual/code \
+#          -o /scratch300/$USER/dflash_visual/fetch_coco.log \
+#          cluster/scripts/fetch_coco_captions.sh
 set -euo pipefail
+
+source /scratch300/$USER/env.sh
+module load anaconda
+conda activate /scratch300/$USER/conda_envs/unlearning
 
 source "$(dirname "$0")/../env.sh"
 
@@ -9,7 +20,7 @@ OUT="$DFLASH_DATA/coco"
 mkdir -p "$OUT"
 cd "$OUT"
 
-if [ ! -f annotations_trainval2017.zip ]; then
+if [ ! -f annotations_trainval2017.zip ] && [ ! -d annotations ]; then
     echo "[coco] downloading captions"
     wget -q --show-progress http://images.cocodataset.org/annotations/annotations_trainval2017.zip
 fi
@@ -37,6 +48,5 @@ for split in ["train", "val"]:
     print(f"[coco] wrote {dst}  ({len(data['annotations'])} captions)")
 PY
 
-# trim the bulky raw archive once converted
 rm -f annotations_trainval2017.zip
 echo "[coco] DONE"

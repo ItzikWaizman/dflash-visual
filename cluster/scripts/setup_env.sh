@@ -1,36 +1,65 @@
 #!/bin/bash
-# One-time cluster setup: conda env, deps, pretrained weights.
-# sbatch --gres=gpu:1 --time=2:00:00 -o setup.log cluster/scripts/setup_env.sh
+# One-time cluster setup: install DFlash deps into the existing `unlearning`
+# conda env, then download LlamaGen pretrained weights.
+#
+# Usage:
+#   sbatch -A gpu-tad-wolf_v2 -p gpu-tad-pool --qos=owner \
+#          --gres=gpu:1 --time=2:00:00 \
+#          --cpus-per-task=2 --mem=16G \
+#          --chdir /scratch300/$USER/dflash_visual/code \
+#          -o /scratch300/$USER/dflash_visual/setup_env.log \
+#          cluster/scripts/setup_env.sh
 set -euo pipefail
+
+source /scratch300/$USER/env.sh
+module load anaconda
+conda activate /scratch300/$USER/conda_envs/unlearning
 
 source "$(dirname "$0")/../env.sh"
 
-if [ ! -d "$CONDA_ENV" ]; then
-    echo "[setup] creating conda env at $CONDA_ENV"
-    conda create -y -p "$CONDA_ENV" python=3.12
-    conda activate "$CONDA_ENV"
+echo "[setup] python: $(which python)  $(python -V)"
+echo "[setup] pip:    $(which pip)"
+
+# Install torch FIRST against the cu128 index (matches the 5080 box).
+# If the cluster's `unlearning` env already has a working torch, this is a no-op.
+pip install --upgrade pip
+if ! python -c "import torch; assert torch.cuda.is_available()" 2>/dev/null; then
+    echo "[setup] installing torch (cu128 wheels)"
+    pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
+else
+    echo "[setup] torch already importable with CUDA -> skipping"
 fi
 
-echo "[setup] installing python deps"
-pip install --upgrade pip
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu128
-pip install numpy transformers huggingface_hub safetensors
-pip install bitsandbytes ftfy beautifulsoup4 sentencepiece
-pip install Pillow tqdm
+# DFlash-specific deps.
+pip install -r "$DFLASH_CODE/cluster/requirements.txt"
 
+# Smoke-test the imports we actually use.
+python - <<'PY'
+import torch, numpy, transformers, huggingface_hub, ftfy, sentencepiece
+print("[setup] torch", torch.__version__, "cuda?", torch.cuda.is_available(),
+      "device count:", torch.cuda.device_count() if torch.cuda.is_available() else 0)
+print("[setup] transformers", transformers.__version__)
+try:
+    import bitsandbytes as bnb
+    print("[setup] bitsandbytes", bnb.__version__)
+except Exception as e:
+    print(f"[setup] bitsandbytes unavailable (ok, fall back to fp32 AdamW): {e}")
+PY
+
+# ---- pretrained weights ------------------------------------------------------
 echo "[setup] downloading LlamaGen pretrained weights to $DFLASH_PRETRAINED/llamagen"
 mkdir -p "$DFLASH_PRETRAINED/llamagen"
 cd "$DFLASH_PRETRAINED/llamagen"
 download() {
-    [ -f "$2" ] && return 0
+    [ -f "$2" ] && { echo "  already have $2"; return 0; }
     echo "  fetching $2"
     wget -q --show-progress -O "$2" "$1"
 }
-# c2i targets + VQ tokenizer
+# c2i targets + VQ tokenizer (small + 3B, 384x384)
 download https://huggingface.co/peizesun/llamagen/resolve/main/c2i_3B_384.pt c2i_3B_384.pt
 download https://huggingface.co/peizesun/llamagen/resolve/main/c2i_XXL_384.pt c2i_XXL_384.pt
 download https://huggingface.co/peizesun/llamagen/resolve/main/vq_ds16_c2i.pt vq_ds16_c2i.pt
-# t2i: XL Stage 2 (512) + VQ tokenizer trained on LAION
+# t2i: XL Stage 2 (512x512) + matching VQ tokenizer
 download https://huggingface.co/peizesun/llamagen/resolve/main/t2i_XL_stage2_512.pt t2i_XL_stage2_512.pt
 download https://huggingface.co/peizesun/llamagen/resolve/main/vq_ds16_t2i.pt vq_ds16_t2i.pt
 

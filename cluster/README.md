@@ -21,15 +21,31 @@ $SCRATCH/dflash_visual/          (writable scratch space, target ~50 GB)
 
 Set `$SCRATCH` to your cluster's writable space (e.g. `/scratch300/$USER`).
 
+## Convention: every .sh starts with the same 3 lines
+
+```
+source /scratch300/$USER/env.sh
+module load anaconda
+conda activate /scratch300/$USER/conda_envs/unlearning
+```
+
+then sources our project-local `cluster/env.sh` which sets `DFLASH_ROOT`,
+`HF_HOME`, etc. The conda env (`unlearning`) is the user's existing one; the
+DFlash project just installs its deps into it.
+
 ## One-time setup
 
 Run `cluster/scripts/setup_env.sh` once to:
-1. Create conda env at `$SCRATCH/conda_envs/dflash_visual`
-2. Install PyTorch (cu128 wheels), bitsandbytes, transformers, etc.
-3. Download pretrained models into `$SCRATCH/dflash_visual/pretrained/`
+1. Install DFlash deps into `unlearning` from `cluster/requirements.txt`.
+2. Download LlamaGen pretrained weights into `$SCRATCH/dflash_visual/pretrained/`.
+3. T5 weights lazy-download on first t2i use.
 
 ```
-sbatch --gres=gpu:1 --time=1:00:00 -o setup.log cluster/scripts/setup_env.sh
+sbatch -A gpu-tad-wolf_v2 -p gpu-tad-pool --qos=owner \
+       --gres=gpu:1 --time=2:00:00 --cpus-per-task=2 --mem=16G \
+       --chdir /scratch300/$USER/dflash_visual/code \
+       -o /scratch300/$USER/dflash_visual/setup_env.log \
+       cluster/scripts/setup_env.sh
 ```
 
 ## Running an experiment

@@ -1,0 +1,24 @@
+# Python dependencies for the DFlash visual cluster runs.
+# Install into the existing /scratch300/$USER/conda_envs/unlearning conda env via
+# scripts/setup_env.sh. Versions deliberately loose so the cluster's preinstalled
+# CUDA + torch stay compatible.
+
+# Core (use --index-url for cu128 wheels in setup_env.sh; pin major version here).
+# torch is installed separately by setup_env.sh from the CUDA-specific index.
+
+numpy>=1.26
+transformers>=4.41
+huggingface_hub>=0.23
+safetensors>=0.4
+sentencepiece>=0.2
+
+# Optimizer (8-bit AdamW); skipped silently if not available at runtime.
+bitsandbytes>=0.43
+
+# Text preprocessing for FLAN-T5 prompts (t2i).
+ftfy>=6.1
+beautifulsoup4>=4.12
+
+# Image / utility.
+Pillow>=10.0
+tqdm>=4.66
