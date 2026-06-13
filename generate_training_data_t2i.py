@@ -190,6 +190,11 @@ def main():
                    help="parent of prompts_file; default = $DFLASH_DATA")
     p.add_argument("--array-id", type=int, default=0)
     p.add_argument("--array-size", type=int, default=1)
+    p.add_argument("--mode", choices=["cache", "sample", "auto"], default="auto",
+                   help="cache: build t5_features.npz then exit (single-GPU prep job). "
+                        "sample: assume t5_features.npz exists, only sample shards "
+                        "(use this for the parallel sampling array). "
+                        "auto (legacy): array_id 0 caches, others poll.")
     args = p.parse_args()
 
     with open(args.config, "r", encoding="utf-8") as f:
@@ -221,16 +226,31 @@ def main():
         raise FileNotFoundError(f"prompts file missing: {prompts_file}")
     prompts = load_prompts(prompts_file, dg["num_sequences"], dg["seed"])
     t5_cache = os.path.join(out_dir, "t5_features.npz")
-    if args.array_id == 0:
+    if args.mode == "cache":
+        # Single-purpose prep job: build the cache file and exit. Sampling jobs
+        # depend on this via SLURM --dependency=afterok.
         cache_t5_features(prompts, os.path.join(args.pretrained, enc["cache_rel"]),
                           enc["model"], enc["feature_max_len"], device, t5_cache)
-    else:
-        while not os.path.exists(t5_cache):
-            print(f"[task {args.array_id}] waiting for t5_features.npz ...", flush=True)
-            time.sleep(30)
+        print(f"[cache] DONE -- t5_features.npz at {t5_cache}", flush=True)
+        return
 
-    # Defensive load: even with atomic rename, retry on BadZipFile / OSError in
-    # case of slow NFS metadata propagation across nodes.
+    if args.mode == "sample":
+        if not os.path.exists(t5_cache):
+            raise FileNotFoundError(
+                f"t5_features.npz missing at {t5_cache}. "
+                "Submit the t5-cache job first (cache_t5.sh) and depend on it.")
+    else:  # auto: legacy behavior
+        if args.array_id == 0:
+            cache_t5_features(prompts, os.path.join(args.pretrained, enc["cache_rel"]),
+                              enc["model"], enc["feature_max_len"], device, t5_cache)
+        else:
+            while not os.path.exists(t5_cache):
+                print(f"[task {args.array_id}] waiting for t5_features.npz ...",
+                      flush=True)
+                time.sleep(30)
+
+    # Defensive load: retry on BadZipFile / OSError in case of slow NFS metadata
+    # propagation across nodes (belt-and-suspenders alongside the atomic rename).
     for attempt in range(20):
         try:
             z = np.load(t5_cache, allow_pickle=True)

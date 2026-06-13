@@ -36,7 +36,8 @@ ASZ="${SLURM_ARRAY_TASK_COUNT:-1}"
       python generate_training_data_t2i.py \
           --config "$CONFIG" --run-dir "$RUN_DIR" \
           --pretrained "$DFLASH_PRETRAINED" --data-root "$DFLASH_DATA" \
-          --array-id "$A" --array-size "$ASZ"
+          --array-id "$A" --array-size "$ASZ" \
+          --mode sample
   elif [ "$TASK" = "c2i" ]; then
       python generate_training_data.py \
           --config "$CONFIG" --run-dir "$RUN_DIR" \
