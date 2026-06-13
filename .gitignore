@@ -12,6 +12,12 @@ checkpoints/
 checkpoints_smoke/
 results_smoke*
 results_real*
+results.md
+results.json
+POC.md
+*.pdf
+# reference / non-experiment-code third-party tree
+dflash/
 
 # downloaded model weights
 LlamaGen/pretrained_models/
