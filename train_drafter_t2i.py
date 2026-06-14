@@ -196,11 +196,25 @@ def main():
     start = 0
     if os.path.exists(latest):
         st = torch.load(latest, map_location=device, weights_only=False)
-        drafter.load_state_dict(st["model"])
-        opt.load_state_dict(st["opt"])
-        sched.load_state_dict(st["sched"])
-        start = st["step"]
-        print(f"[t2i train] resumed step {start}", flush=True)
+        # Validate the checkpoint's optimizer state matches what torch.AdamW
+        # expects BEFORE we load any of it. bnb.AdamW8bit checkpoints lack
+        # 'exp_avg'/'exp_avg_sq' keys, and load_state_dict will silently load
+        # partial state, then opt.step() crashes with KeyError. Refuse to
+        # resume in that case and start fresh.
+        opt_state = (st.get("opt") or {}).get("state") or {}
+        first_state = next(iter(opt_state.values()), {}) if opt_state else {}
+        compatible = (not first_state) or ("exp_avg" in first_state and "exp_avg_sq" in first_state)
+        if compatible:
+            drafter.load_state_dict(st["model"])
+            opt.load_state_dict(st["opt"])
+            sched.load_state_dict(st["sched"])
+            start = st["step"]
+            print(f"[t2i train] resumed step {start}", flush=True)
+        else:
+            print(f"[t2i train] WARN: {latest} has incompatible optimizer state "
+                  f"(likely from bnb.AdamW8bit). Starting v2 from scratch; this "
+                  f"file will be overwritten at the first ckpt_every step.",
+                  flush=True)
 
     loss_w = torch.exp(-(torch.arange(BLOCK - 1, dtype=torch.float32)) / tr["gamma"]).to(device)
     loss_w = loss_w / loss_w.mean()
